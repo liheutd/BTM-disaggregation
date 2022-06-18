@@ -1,0 +1,152 @@
+%%%% This code is to disaggregate netload into load and PV
+
+clear
+clc
+
+%%%% Read data: the data is from PecanStreetDataport
+%%%% https://www.pecanstreet.org/dataport/
+    load NTL.mat
+    load PV.mat
+%%%% Check correlation, 5 8 10 users don't have PV, others have correlation  >0.91 
+%%%% The users are in a nearby community
+    Corr_mat = corrcoef(PV);
+%%%% convert    
+    onepv=PV(1:8760,:)';
+    aggpv=sum(onepv,1);
+%%%% Use this standard(std) capacity factor to streamline the code
+%%%% It could be substituded with weather data from NREL NSRDB
+%%%% https://nsrdb.nrel.gov/
+    stdpv=aggpv/max(aggpv);   
+%%%% capacity factor of solar generation: output/maximum output        
+    stdpv=aggpv/max(aggpv);
+%%%% K-means: 4 categories
+    PV_std=reshape(stdpv,24,365);
+    K_means= kmeans(PV_std',4);
+%%%%    
+    [row, col] = find(isnan(K_means));
+    if isempty(row)==0
+       error('Empty data')      
+    end
+%%%% K-means results    
+        l=1;m=1;n=1;o=1;
+        for i=1:365
+            if K_means(i)==1
+               K_1(l,:) =PV_std(:,i);
+               l=l+1;
+            elseif K_means(i)==2
+               K_2(m,:) =PV_std(:,i);
+               m=m+1;
+            elseif K_means(i)==3
+               K_3(n,:) =PV_std(:,i);
+               n=n+1;
+            elseif K_means(i)==4
+               K_4(o,:) =PV_std(:,i);
+               o=o+1;
+            end
+        end
+%%%% check days number is 365+4        
+    if l+m+n+o-4~=365
+       error('Missing datedata')      
+    end
+%%%% K-means plots   
+        figure
+        subplot(2,2,1);
+        plot(K_1')
+        hold on
+        plot(mean(K_1,1),'b--o')
+        hold on
+        subplot(2,2,2);
+        plot(K_2')
+        hold on
+        plot(mean(K_2,1),'r--o')
+        hold on
+        subplot(2,2,3);
+        plot(K_3')
+        hold on
+        plot(mean(K_3,1),'g--o');        
+        hold on
+        subplot(2,2,4);
+        plot(K_4')
+        hold on
+        plot(mean(K_4,1),'y--o');        
+        fourmean=[sum(mean(K_1,1)) sum(mean(K_2,1)) sum(mean(K_3,1)) sum(mean(K_4,1))];
+        [Minmean4,INDEX4]= min(fourmean);
+        
+%%%% one month validation, D_start=0 means starting from Janaury.        
+    D_start=0;        
+    for i=1:10
+        for D=D_start+1:D_start+30
+            eval(['ntlbase',num2str(i),'(D,:)','=','NTL(1+(D-1)*24:24+(D-1)*24,i)',';']);
+        end
+    end
+    
+%%%% Here Max means max solar generation, 
+%%%% Use minimal netload in each hour of this month
+    Max_1=min(ntlbase1);Max_2=min(ntlbase2);Max_3=min(ntlbase3);Max_4=min(ntlbase4);Max_5=min(ntlbase5);
+    Max_6=min(ntlbase6);Max_7=min(ntlbase7);Max_8=min(ntlbase8);Max_9=min(ntlbase9);Max_10=min(ntlbase10);
+%%%% Check errors    
+    error1=sum(abs(ntlbase1-Max_1),2);error2=sum(abs(ntlbase2-Max_2),2);error3=sum(abs(ntlbase3-Max_3),2);error4=sum(abs(ntlbase4-Max_4),2);error5=sum(abs(ntlbase5-Max_5),2);
+    error6=sum(abs(ntlbase6-Max_6),2);error7=sum(abs(ntlbase7-Max_7),2);error8=sum(abs(ntlbase8-Max_8),2);error9=sum(abs(ntlbase9-Max_9),2);error10=sum(abs(ntlbase10-Max_10),2);
+%%%% Aggregate matrix
+    MAX_ALL=[Max_1;Max_2;Max_3;Max_4;Max_5;Max_6;Max_7;Max_8;Max_9;Max_10];
+    error_all=[error1 error2 error3 error4 error5 error6 error7 error8 error9 error10];
+%%%% Majority voting
+    for i=1:10
+        [Value_min Voting_min(i)]= min(error_all(:,i));
+    end
+%%%% Voting results: mode is the most frequent results   
+%%%% Day_mode is the target day for disaggregation
+    Day_mode=mode(Voting_min)+D_start;
+%%%% Choose 2 am to 3 am as minimal baseload: low consumption time  
+    A_low=MAX_ALL(:,3);
+    repA=repmat(A_low,1,24);
+%%%% Max solar generation - Min baseload = Max solar generation.    
+    MAX_ALL_new=MAX_ALL-repA;
+%%%% Plot 10 users on this day. This day is close to clear sky.
+%     figure
+%     plot(MAX_ALL_new');
+%%%% Smooth the figures and plot again   
+%%%% yy is the disaggregated PV generation
+    figure
+    for i=1:10
+        yy(i,:) = smooth(MAX_ALL_new(i,:),'lowess');
+        plot(yy(i,:));
+        hold on
+    end
+%%
+%%%% Validate with real capacity factor, + 0.0005 to aviod zeros values
+    capacity_all=-yy./(PV_std(:,Day_mode)');    
+%%%% Choose hours 10 to 15 with highest solar generation    
+    max_capacity=max(capacity_all(:,10:15),[],2);
+%%%% Estimated capacity    
+    capacity=max_capacity;    
+    estimatepv=capacity*stdpv;
+%%%% Users 5 8 and 10 have no PV
+    estimatepv(10,:)=0;estimatepv(8,:)=0;estimatepv(5,:)=0;
+%%%% Estimated netload  
+    L_dis=abs(NTL+estimatepv');
+%%%% Real netload 
+    L_actual=abs(NTL+PV);
+%%%% Users 5 8 and 10 have no PV, keep their original values    
+    L_dis(:,10)=L_actual(:,10);L_dis(:,8)=L_actual(:,8);L_dis(:,5)=L_actual(:,5);
+
+%%%% Plot results of last week
+    PV_dis = estimatepv';
+    figure
+    for i = 1:10
+        subplot(5,2,i);        
+        plot(PV(553:720,i)); 
+        hold on
+        plot(PV_dis(553:720,i),'--o','MarkerSize',3);
+        
+        legend('Actual Solar','Estimated Solar')
+        xlabel("Time (h)")
+        ylabel("Solar generation (kW)")
+        title("Behind-the-meter disaggregation")
+    end
+    
+%%%% Accuracy: MAPE of netload  
+%%%% Single 
+    MAPE=(1/720)*sum(abs(L_dis(1:720,:)-L_actual(1:720,:))./(abs(L_actual(1:720,:))+0.0001),1);
+%%%% Aggregated 
+    MAPE_all=(1/720)*sum(abs(sum(L_dis(1:720,:),2)-sum(L_actual(1:720,:),2))./(abs(sum(L_actual(1:720,:),2))),1);
