@@ -8,4 +8,4 @@ https://personal.utdallas.edu/~jiezhang/index.html
 
 Li He, li.he@utdallas.edu, Ph.D. Candidate, Department of Electrical and Computer Engineering
 
-Jie Zhang, jiezhang@utdallas.edu, Assistant Professor, Department of Mechanical Engineering, Department of Electrical and Computer Engineering (Affiliated)
+Jie Zhang, jiezhang@utdallas.edu, Associate Professor, Department of Mechanical Engineering, Department of Electrical and Computer Engineering (Affiliated)
